@@ -1,0 +1,72 @@
+import sqlite3
+import hashlib
+import time
+import os
+from datetime import datetime
+from typing import Optional, Dict, Any, List
+
+DB_PATH = "office_assistant.db"
+
+class DatabaseManager:
+    @staticmethod
+    def get_connection():
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    @classmethod
+    def init_db(cls):
+        with cls.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mobile_or_username TEXT UNIQUE NOT NULL,
+                full_name TEXT NOT NULL,
+                role TEXT DEFAULT 'staff',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP
+            );
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                session_token TEXT UNIQUE NOT NULL,
+                device_info TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                is_valid INTEGER DEFAULT 1,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            """)
+            conn.commit()
+
+    @classmethod
+    def get_or_create_user(cls, identifier: str) -> Dict[str, Any]:
+        cls.init_db()
+        with cls.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE mobile_or_username = ?", (identifier,))
+            user = cursor.fetchone()
+            if user:
+                return dict(user)
+            else:
+                name = f"यूज़र ({identifier[-4:]})" if identifier.isdigit() else identifier
+                cursor.execute("INSERT INTO users (mobile_or_username, full_name) VALUES (?, ?)", (identifier, name))
+                conn.commit()
+                cursor.execute("SELECT * FROM users WHERE id = ?", (cursor.lastrowid,))
+                return dict(cursor.fetchone())
+
+    @classmethod
+    def create_session(cls, user_id: int, days_valid: int = 14) -> str:
+        token = hashlib.sha256(f"{user_id}_{time.time()}_{os.urandom(8).hex()}".encode()).hexdigest()
+        expiry = datetime.fromtimestamp(time.time() + (days_valid * 86400)).strftime('%Y-%m-%d %H:%M:%S')
+        with cls.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO user_sessions (user_id, session_token, expires_at)
+            VALUES (?, ?, ?)
+            """, (user_id, token, expiry))
+            conn.commit()
+        return token
