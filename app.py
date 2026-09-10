@@ -1,16 +1,17 @@
 import streamlit as st
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageEnhance
 import pytesseract
 from otp_service import OTPService
 from db_manager import DatabaseManager
 
-# पेज कॉन्फ़िगरेशन
+# 1. पेज कॉन्फ़िगरेशन
 st.set_page_config(
     page_title="AI Document & Office Assistant",
     page_icon="📄",
     layout="centered"
 )
 
+# डेटाबेस शुरू करें
 DatabaseManager.init_db()
 
 # कस्टम हेडर स्टाइल
@@ -18,17 +19,19 @@ st.markdown("""
 <style>
     .main-title { text-align: center; color: #1e3a8a; margin-bottom: 2px; }
     .subtitle { text-align: center; color: #64748b; font-size: 14px; margin-bottom: 20px; }
+    .stButton>button { border-radius: 8px; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
+# 2. सुरक्षा व लॉगिन फ़ंक्शन
 def check_auth():
     if st.session_state.get("authenticated", False):
         return True
 
-    st.markdown("<h2 class='main-title'>🔐 AI Office Assistant</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 class='main-title'>AI Office Assistant</h2>", unsafe_allow_html=True)
     st.markdown("<p class='subtitle'>सुरक्षित लॉगिन सिस्टम</p>", unsafe_allow_html=True)
 
-    tab_otp, tab_pin = st.tabs(["📱 मोबाइल OTP", "🔑 सुरक्षा PIN"])
+    tab_otp, tab_pin = st.tabs(["मोबाइल OTP", "सुरक्षा PIN"])
 
     with tab_otp:
         col_phone, col_btn = st.columns([2, 1])
@@ -44,8 +47,8 @@ def check_auth():
                 else:
                     st.error(msg)
 
-        otp_val = st.text_input("6-अंकीय OTP", placeholder="••••••", max_chars=6)
-        if st.button("लॉगिन करें 🚀", type="primary", use_container_width=True):
+        otp_val = st.text_input("6-अंकीय OTP", placeholder="123456", max_chars=6)
+        if st.button("लॉगिन करें", type="primary", use_container_width=True):
             ok, msg = OTPService.verify_otp(otp_val)
             if ok:
                 st.session_state["authenticated"] = True
@@ -70,56 +73,66 @@ def check_auth():
 if not check_auth():
     st.stop()
 
-# ----------------- मुख्य ऐप (लॉगिन के बाद) -----------------
+# 3. मुख्य ऐप (लॉगिन के बाद)
 with st.sidebar:
-    st.markdown(f"👤 **{st.session_state.get('user_name', 'Sonu Saini')}**")
-    st.markdown("🟢 **ऑनलाइन**")
+    st.markdown(f"**यूज़र:** {st.session_state.get('user_name', 'Sonu Saini')}")
+    st.markdown("**स्थिति:** ऑनलाइन")
     if st.button("लॉगआउट", use_container_width=True):
         st.session_state.clear()
         st.rerun()
 
-st.markdown("<h2 class='main-title'>📄 AI Document Scanner & OCR</h2>", unsafe_allow_html=True)
+st.markdown("<h2 class='main-title'>AI Document Scanner & OCR</h2>", unsafe_allow_html=True)
 st.markdown("<p class='subtitle'>दस्तावेज़ की फोटो अपलोड करें और हिंदी व अंग्रेज़ी टेक्स्ट निकालें</p>", unsafe_allow_html=True)
 
-# भाषा चयन विकल्प
-ocr_lang = st.radio("दस्तावेज़ की भाषा चुनें:", ["हिंदी + English (hin+eng)", "केवल English (eng)", "केवल हिंदी (hin)"], horizontal=True)
-lang_code = "hin+eng" if "hin+eng" in ocr_lang else ("hin" if "हिंदी" in ocr_lang else "eng")
+# भाषा चयन
+ocr_lang = st.radio(
+    "दस्तावेज़ की भाषा चुनें:",
+    ["हिंदी + English", "केवल English", "केवल हिंदी"],
+    horizontal=True
+)
 
-uploaded = st.file_uploader("दस्तावेज़ की फोटो चुनें (JPG / PNG / PDF)", type=["png", "jpg", "jpeg"])
+if "हिंदी + English" in ocr_lang:
+    lang_code = "hin+eng"
+elif "हिंदी" in ocr_lang:
+    lang_code = "hin"
+else:
+    lang_code = "eng"
+
+uploaded = st.file_uploader("दस्तावेज़ की फोटो चुनें (JPG / PNG)", type=["png", "jpg", "jpeg"])
 
 if uploaded:
     img = Image.open(uploaded)
     st.image(img, caption="अपलोड किया गया दस्तावेज़", use_container_width=True)
 
-    if st.button("⚡ OCR टेक्स्ट निकालें", type="primary", use_container_width=True):
+    if st.button("OCR टेक्स्ट निकालें", type="primary", use_container_width=True):
         with st.spinner("OCR इंजन दस्तावेज़ पढ़ रहा है..."):
             try:
-                # 1. इमेज प्री-प्रोसेसिंग (OCR की सटीकता बढ़ाने के लिए)
+                # इमेज को साफ करें
                 gray_img = img.convert('L')
                 enhancer = ImageEnhance.Contrast(gray_img)
                 enhanced_img = enhancer.enhance(1.5)
 
-                # 2. Tesseract OCR कॉल
+                # Tesseract OCR चलाएँ
                 extracted_text = pytesseract.image_to_string(enhanced_img, lang=lang_code)
 
                 if extracted_text.strip():
-                    st.success("✅ OCR सफलतापूर्वक पूरा हुआ!")
-                    st.text_area("दस्तावेज़ से निकाला गया टेक्स्ट:", extracted_text, height=220)
+                    st.success("OCR सफलतापूर्वक पूरा हुआ!")
+                    st.text_area("निकाला गया टेक्स्ट:", extracted_text, height=220)
                     st.download_button(
-                        "📥 टेक्स्ट फ़ाइल (.txt) डाउनलोड करें",
+                        "टेक्स्ट फ़ाइल (.txt) डाउनलोड करें",
                         extracted_text,
                         file_name="extracted_document.txt",
                         use_container_width=True
                     )
                 else:
-                    # यदि इमेज बहुत धुंधली हो तो ओरिजिनल इमेज पर प्रयास
+                    # यदि पहली बार में खाली मिले तो सामान्य इमेज से प्रयास
                     fallback_text = pytesseract.image_to_string(img, lang="eng")
                     if fallback_text.strip():
-                        st.success("✅ OCR पूरा हुआ (मूल इमेज से):")
+                        st.success("OCR पूरा हुआ (मूल इमेज से):")
                         st.text_area("निकाला गया टेक्स्ट:", fallback_text, height=220)
                     else:
-                        st.warning("⚠️ फोटो में कोई स्पष्ट अक्षर नहीं मिले। कृपया साफ़ रोशनी वाली फोटो अपलोड करें।")
+                        st.warning("फोटो में कोई स्पष्ट अक्षर नहीं मिले। कृपया साफ़ रोशनी वाली फोटो अपलोड करें।")
 
             except Exception as e:
-                st.error(f"❌ OCR इंजन त्रुटि: {str(e)}")
-                st.info("💡
+                st.error(f"OCR इंजन त्रुटि: {str(e)}")
+                st.info
