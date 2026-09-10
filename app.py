@@ -69,3 +69,57 @@ def check_auth():
 
 if not check_auth():
     st.stop()
+
+# ----------------- मुख्य ऐप (लॉगिन के बाद) -----------------
+with st.sidebar:
+    st.markdown(f"👤 **{st.session_state.get('user_name', 'Sonu Saini')}**")
+    st.markdown("🟢 **ऑनलाइन**")
+    if st.button("लॉगआउट", use_container_width=True):
+        st.session_state.clear()
+        st.rerun()
+
+st.markdown("<h2 class='main-title'>📄 AI Document Scanner & OCR</h2>", unsafe_allow_html=True)
+st.markdown("<p class='subtitle'>दस्तावेज़ की फोटो अपलोड करें और हिंदी व अंग्रेज़ी टेक्स्ट निकालें</p>", unsafe_allow_html=True)
+
+# भाषा चयन विकल्प
+ocr_lang = st.radio("दस्तावेज़ की भाषा चुनें:", ["हिंदी + English (hin+eng)", "केवल English (eng)", "केवल हिंदी (hin)"], horizontal=True)
+lang_code = "hin+eng" if "hin+eng" in ocr_lang else ("hin" if "हिंदी" in ocr_lang else "eng")
+
+uploaded = st.file_uploader("दस्तावेज़ की फोटो चुनें (JPG / PNG / PDF)", type=["png", "jpg", "jpeg"])
+
+if uploaded:
+    img = Image.open(uploaded)
+    st.image(img, caption="अपलोड किया गया दस्तावेज़", use_container_width=True)
+
+    if st.button("⚡ OCR टेक्स्ट निकालें", type="primary", use_container_width=True):
+        with st.spinner("OCR इंजन दस्तावेज़ पढ़ रहा है..."):
+            try:
+                # 1. इमेज प्री-प्रोसेसिंग (OCR की सटीकता बढ़ाने के लिए)
+                gray_img = img.convert('L')
+                enhancer = ImageEnhance.Contrast(gray_img)
+                enhanced_img = enhancer.enhance(1.5)
+
+                # 2. Tesseract OCR कॉल
+                extracted_text = pytesseract.image_to_string(enhanced_img, lang=lang_code)
+
+                if extracted_text.strip():
+                    st.success("✅ OCR सफलतापूर्वक पूरा हुआ!")
+                    st.text_area("दस्तावेज़ से निकाला गया टेक्स्ट:", extracted_text, height=220)
+                    st.download_button(
+                        "📥 टेक्स्ट फ़ाइल (.txt) डाउनलोड करें",
+                        extracted_text,
+                        file_name="extracted_document.txt",
+                        use_container_width=True
+                    )
+                else:
+                    # यदि इमेज बहुत धुंधली हो तो ओरिजिनल इमेज पर प्रयास
+                    fallback_text = pytesseract.image_to_string(img, lang="eng")
+                    if fallback_text.strip():
+                        st.success("✅ OCR पूरा हुआ (मूल इमेज से):")
+                        st.text_area("निकाला गया टेक्स्ट:", fallback_text, height=220)
+                    else:
+                        st.warning("⚠️ फोटो में कोई स्पष्ट अक्षर नहीं मिले। कृपया साफ़ रोशनी वाली फोटो अपलोड करें।")
+
+            except Exception as e:
+                st.error(f"❌ OCR इंजन त्रुटि: {str(e)}")
+                st.info("💡
