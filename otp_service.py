@@ -1,0 +1,82 @@
+import os
+import random
+import time
+import requests
+import streamlit as st
+
+class OTPService:
+    OTP_VALIDITY_SECONDS = 600
+    RESEND_COOLDOWN_SECONDS = 60
+
+    @staticmethod
+    def generate_otp(length=6) -> str:
+        return "".join([str(random.randint(0, 9)) for _ in range(length)])
+
+    @classmethod
+    def send_otp_fast2sms(cls, mobile_number: str, otp: str, api_key: str = None) -> dict:
+        api_key = api_key or os.getenv("FAST2SMS_API_KEY") or st.secrets.get("FAST2SMS_API_KEY", "")
+        if not api_key:
+            return {
+                "success": True, 
+                "mode": "simulation", 
+                "message": f"[परीक्षण मोड] OTP कोड: {otp}"
+            }
+
+        url = "https://www.fast2sms.com/dev/bulkV2"
+        headers = {'authorization': api_key, 'Content-Type': "application/x-www-form-urlencoded"}
+        payload = {"variables_values": otp, "route": "otp", "numbers": mobile_number.replace("+91", "").strip()}
+
+        try:
+            response = requests.post(url, data=payload, headers=headers, timeout=8)
+            res_data = response.json()
+            if res_data.get("return") is True:
+                return {"success": True, "mode": "live", "message": "SMS सफलतापूर्वक भेज दिया गया है।"}
+            else:
+                return {"success": False, "mode": "live", "message": f"Fast2SMS त्रुटि: {res_data.get('message')}"}
+        except Exception as e:
+            return {"success": False, "mode": "live", "message": f"नेटवर्क त्रुटि: {str(e)}"}
+
+    @classmethod
+    def dispatch_otp(cls, mobile_number: str) -> tuple[bool, str]:
+        clean_num = mobile_number.replace("+91", "").replace(" ", "").strip()
+        if len(clean_num) != 10 or not clean_num.isdigit():
+            return False, "कृपया 10-अंकों का वैध भारतीय मोबाइल नंबर दर्ज करें।"
+
+        last_sent = st.session_state.get("otp_last_sent_time", 0)
+        current_time = time.time()
+        if current_time - last_sent < cls.RESEND_COOLDOWN_SECONDS:
+            remaining = int(cls.RESEND_COOLDOWN_SECONDS - (current_time - last_sent))
+            return False, f"कृपया नया OTP भेजने से पहले {remaining} सेकंड प्रतीक्षा करें।"
+
+        new_otp = cls.generate_otp(6)
+        st.session_state["active_otp"] = new_otp
+        st.session_state["otp_created_time"] = current_time
+        st.session_state["otp_last_sent_time"] = current_time
+        st.session_state["otp_mobile_number"] = clean_num
+
+        result = cls.send_otp_fast2sms(clean_num, new_otp)
+        if result["success"]:
+            msg = f"OTP {clean_num} पर भेजा गया।"
+            if result.get("mode") == "simulation":
+                msg += f" ({result['message']})"
+            return True, msg
+        return False, result["message"]
+
+    @classmethod
+    def verify_otp(cls, entered_otp: str) -> tuple[bool, str]:
+        stored_otp = st.session_state.get("active_otp")
+        created_time = st.session_state.get("otp_created_time", 0)
+
+        if not stored_otp:
+            return False, "कोई सक्रिय OTP नहीं मिला। कृपया पहले OTP मँगवाएँ।"
+
+        if time.time() - created_time > cls.OTP_VALIDITY_SECONDS:
+            st.session_state.pop("active_otp", None)
+            return False, "OTP की समय सीमा समाप्त हो गई है।"
+
+        if str(entered_otp).strip() == str(stored_otp).strip():
+            st.session_state.pop("active_otp", None)
+            st.session_state["authenticated"] = True
+            st.session_state["user"] = f"+91 {st.session_state.get('otp_mobile_number')}"
+            return True, "सत्यापन सफल!"
+        return False, "❌ अमान्य OTP! कृपया सही कोड दर्ज करें।"
